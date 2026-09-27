@@ -4,6 +4,8 @@
 
 #ifndef SIMULATED_AUTONOMOUS_SENSOR_HUB_DATA_H
 
+#define SIMULATED_AUTONOMOUS_SENSOR_HUB_DATA_H
+
 #include <stdint.h>
 
 typedef struct {
@@ -14,6 +16,4 @@ typedef struct {
 
 extern SimulatedUART_t uart_peripheral;
 
-#define SIMULATED_AUTONOMOUS_SENSOR_HUB_DATA_H
-
-#endif //SIMULATED_AUTONOMOUS_SENSOR_HUB_DATA_H
+#endif
