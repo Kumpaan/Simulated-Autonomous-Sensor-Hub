@@ -8,6 +8,8 @@
 
 SimulatedUART_t uart_peripheral = {0};
 
+static uint8_t rx_buffer[256];
+
 // static void UART_enable();
 
 // static int UART_SetBaudRate(uint32_t baud_rate);
@@ -24,9 +26,19 @@ int main(void) {
     pthread_t HWSimulatorThread;
     pthread_create(&HWSimulatorThread,NULL, HWSimulator, NULL);
 
+    uint16_t head = 0;
+    uint16_t tail = 0;
+
     while (1) {
         if ((uart_peripheral.STATUS_REG & 1) == 1) {
-            printf("Data register: %d\n", uart_peripheral.DATA_REG);
+            const uint16_t next_head = (head + 1) & 255;
+            if (next_head == tail) {
+                uart_peripheral.STATUS_REG |= 1 << 1;
+            }
+            else {
+                rx_buffer[head] = uart_peripheral.DATA_REG;
+                head = next_head;
+            }
             uart_peripheral.STATUS_REG &= ~1;
         }
     }
