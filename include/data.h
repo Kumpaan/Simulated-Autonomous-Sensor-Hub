@@ -16,4 +16,15 @@ typedef struct {
 
 extern SimulatedUART_t uart_peripheral;
 
+typedef struct {
+    void (*task_func)(void);
+    uint16_t period_ms;
+    uint32_t last_run_time;
+
+} Task_t;
+
+void ReadUART_func (void);
+void Telemetry_func (void);
+void Heartbeat_func (void);
+
 #endif

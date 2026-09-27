@@ -3,12 +3,20 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "data.h"
 
 SimulatedUART_t uart_peripheral = {0};
 
+Task_t Task_ReadUART;
+Task_t Task_Telemetry;
+Task_t Task_Heartbeat;
+
 static uint8_t rx_buffer[256];
+
+uint16_t rx_head = 0;
+uint16_t rx_tail = 0;
 
 // static void UART_enable();
 
@@ -23,23 +31,48 @@ static void* HWSimulator();
 int main(void) {
     printf("Hello, World!\n");
 
+    Task_ReadUART.period_ms = 5;
+    Task_Telemetry.period_ms = 100;
+    Task_Heartbeat.period_ms = 500;
+
     pthread_t HWSimulatorThread;
     pthread_create(&HWSimulatorThread,NULL, HWSimulator, NULL);
 
-    uint16_t head = 0;
-    uint16_t tail = 0;
+    struct timespec current_time, last_run_time;
+    clock_gettime(CLOCK_MONOTONIC, &last_run_time);
+    Task_ReadUART.last_run_time = last_run_time.tv_nsec;
+    Task_Heartbeat.last_run_time = last_run_time.tv_nsec;
+    Task_Telemetry.last_run_time = last_run_time.tv_nsec;
+
+    Task_ReadUART.task_func = ReadUART_func;
+    Task_Telemetry.task_func = Telemetry_func;
+    Task_Heartbeat.task_func = Heartbeat_func;
 
     while (1) {
         if ((uart_peripheral.STATUS_REG & 1) == 1) {
-            const uint16_t next_head = (head + 1) & 255;
-            if (next_head == tail) {
+            const uint16_t next_head = (rx_head + 1) & 255;
+            if (next_head == rx_tail) {
                 uart_peripheral.STATUS_REG |= 1 << 1;
             }
             else {
-                rx_buffer[head] = uart_peripheral.DATA_REG;
-                head = next_head;
+                rx_buffer[rx_head] = uart_peripheral.DATA_REG;
+                rx_head = next_head;
             }
             uart_peripheral.STATUS_REG &= ~1;
+        }
+
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        if (current_time.tv_nsec - Task_ReadUART.last_run_time >= Task_ReadUART.period_ms) {
+            Task_ReadUART.last_run_time = current_time.tv_nsec;
+            Task_ReadUART.task_func();
+        }
+        if (current_time.tv_nsec - Task_Telemetry.last_run_time >= Task_Telemetry.period_ms) {
+            Task_Telemetry.last_run_time = current_time.tv_nsec;
+            Task_Telemetry.task_func();
+        }
+        if (current_time.tv_nsec - Task_Heartbeat.last_run_time >= Task_Heartbeat.period_ms) {
+            Task_Heartbeat.last_run_time = current_time.tv_nsec;
+            Task_Heartbeat.task_func();
         }
     }
 
@@ -88,3 +121,23 @@ void* HWSimulator() {
 
     return NULL;
 }
+
+void ReadUART_func(void) {
+    if ((rx_head != 0 || rx_tail != 0) && !((uart_peripheral.STATUS_REG >> 1) & 1)) {
+        uint32_t parsed_data = 0;
+        for (int i = 0; i < 4; i++) {
+            parsed_data |= rx_buffer[rx_tail + i];
+            parsed_data = parsed_data << 8;
+        }
+        printf("Parsed Data: %lu\n", (unsigned long)parsed_data);
+    }
+}
+
+void Telemetry_func(void) {
+
+}
+
+void Heartbeat_func(void) {
+    printf("System OK\n");
+}
+
