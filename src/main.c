@@ -9,14 +9,16 @@
 
 SimulatedUART_t uart_peripheral = {0};
 
-Task_t Task_ReadUART;
-Task_t Task_Telemetry;
-Task_t Task_Heartbeat;
+static Task_t Task_ReadUART;
+static Task_t Task_Telemetry;
+static Task_t Task_Heartbeat;
 
 static uint8_t rx_buffer[256];
 
-uint16_t rx_head = 0;
-uint16_t rx_tail = 0;
+static uint16_t rx_head = 0;
+static uint16_t rx_tail = 0;
+
+static uint32_t bytes_processed = 0;
 
 // static void UART_enable();
 
@@ -26,7 +28,7 @@ uint16_t rx_tail = 0;
 
 // static void UART_SWReset();
 
-static void* HWSimulator();
+static void *HWSimulator();
 
 int main(void) {
     printf("Hello, World!\n");
@@ -38,11 +40,14 @@ int main(void) {
     pthread_t HWSimulatorThread;
     pthread_create(&HWSimulatorThread,NULL, HWSimulator, NULL);
 
-    struct timespec current_time, last_run_time;
-    clock_gettime(CLOCK_MONOTONIC, &last_run_time);
-    Task_ReadUART.last_run_time = last_run_time.tv_nsec;
-    Task_Heartbeat.last_run_time = last_run_time.tv_nsec;
-    Task_Telemetry.last_run_time = last_run_time.tv_nsec;
+    {
+        struct timespec last_run_time;
+        clock_gettime(CLOCK_MONOTONIC, &last_run_time);
+        const uint32_t last_run_time_ms = last_run_time.tv_sec * 1000 + last_run_time.tv_nsec / 1000000;
+        Task_ReadUART.last_run_time = last_run_time_ms;
+        Task_Heartbeat.last_run_time = last_run_time_ms;
+        Task_Telemetry.last_run_time = last_run_time_ms;
+    }
 
     Task_ReadUART.task_func = ReadUART_func;
     Task_Telemetry.task_func = Telemetry_func;
@@ -53,25 +58,26 @@ int main(void) {
             const uint16_t next_head = (rx_head + 1) & 255;
             if (next_head == rx_tail) {
                 uart_peripheral.STATUS_REG |= 1 << 1;
-            }
-            else {
+            } else {
                 rx_buffer[rx_head] = uart_peripheral.DATA_REG;
                 rx_head = next_head;
             }
             uart_peripheral.STATUS_REG &= ~1;
         }
 
+        struct timespec current_time;
         clock_gettime(CLOCK_MONOTONIC, &current_time);
-        if (current_time.tv_nsec - Task_ReadUART.last_run_time >= Task_ReadUART.period_ms) {
-            Task_ReadUART.last_run_time = current_time.tv_nsec;
+        const uint32_t current_time_ms = current_time.tv_sec * 1000 + current_time.tv_nsec / 1000000;
+        if (current_time_ms - Task_ReadUART.last_run_time >= Task_ReadUART.period_ms) {
+            Task_ReadUART.last_run_time = current_time_ms;
             Task_ReadUART.task_func();
         }
-        if (current_time.tv_nsec - Task_Telemetry.last_run_time >= Task_Telemetry.period_ms) {
-            Task_Telemetry.last_run_time = current_time.tv_nsec;
+        if (current_time_ms - Task_Telemetry.last_run_time >= Task_Telemetry.period_ms) {
+            Task_Telemetry.last_run_time = current_time_ms;
             Task_Telemetry.task_func();
         }
-        if (current_time.tv_nsec - Task_Heartbeat.last_run_time >= Task_Heartbeat.period_ms) {
-            Task_Heartbeat.last_run_time = current_time.tv_nsec;
+        if (current_time_ms - Task_Heartbeat.last_run_time >= Task_Heartbeat.period_ms) {
+            Task_Heartbeat.last_run_time = current_time_ms;
             Task_Heartbeat.task_func();
         }
     }
@@ -108,7 +114,7 @@ int main(void) {
 //     uart_peripheral.CTRL_REG |= 1 << 7;
 //}
 
-void* HWSimulator() {
+void *HWSimulator() {
     printf("HW Simulator initiated.");
 
     srand(time(NULL));
@@ -123,21 +129,19 @@ void* HWSimulator() {
 }
 
 void ReadUART_func(void) {
-    if ((rx_head != 0 || rx_tail != 0) && !((uart_peripheral.STATUS_REG >> 1) & 1)) {
-        uint32_t parsed_data = 0;
-        for (int i = 0; i < 4; i++) {
-            parsed_data |= rx_buffer[rx_tail + i];
-            parsed_data = parsed_data << 8;
-        }
-        printf("Parsed Data: %lu\n", (unsigned long)parsed_data);
+    while (rx_tail != rx_head) {
+        const uint8_t received_data = rx_buffer[rx_tail];
+        rx_tail = (rx_tail + 1) & 255;
+        bytes_processed++;
+        printf("Received Data: %02X\n", received_data);
     }
 }
 
 void Telemetry_func(void) {
-
+    printf("Bytes processed in the last 100 ms: %d\n", bytes_processed);
+    bytes_processed = 0;
 }
 
 void Heartbeat_func(void) {
     printf("System OK\n");
 }
-
