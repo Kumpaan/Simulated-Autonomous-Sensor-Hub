@@ -30,6 +30,12 @@ static uint32_t bytes_processed = 0;
 
 static void *HWSimulator();
 
+static void SetLastRunTime();
+
+static void RunTasks();
+
+static void BufferFill();
+
 int main(void) {
     printf("Hello, World!\n");
 
@@ -40,47 +46,13 @@ int main(void) {
     pthread_t HWSimulatorThread;
     pthread_create(&HWSimulatorThread,NULL, HWSimulator, NULL);
 
-    {
-        struct timespec last_run_time;
-        clock_gettime(CLOCK_MONOTONIC, &last_run_time);
-        const uint32_t last_run_time_ms = last_run_time.tv_sec * 1000 + last_run_time.tv_nsec / 1000000;
-        Task_ReadUART.last_run_time = last_run_time_ms;
-        Task_Heartbeat.last_run_time = last_run_time_ms;
-        Task_Telemetry.last_run_time = last_run_time_ms;
-    }
+    SetLastRunTime();
 
     Task_ReadUART.task_func = ReadUART_func;
     Task_Telemetry.task_func = Telemetry_func;
     Task_Heartbeat.task_func = Heartbeat_func;
 
-    while (1) {
-        if ((uart_peripheral.STATUS_REG & 1) == 1) {
-            const uint16_t next_head = (rx_head + 1) & 255;
-            if (next_head == rx_tail) {
-                uart_peripheral.STATUS_REG |= 1 << 1;
-            } else {
-                rx_buffer[rx_head] = uart_peripheral.DATA_REG;
-                rx_head = next_head;
-            }
-            uart_peripheral.STATUS_REG &= ~1;
-        }
-
-        struct timespec current_time;
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-        const uint32_t current_time_ms = current_time.tv_sec * 1000 + current_time.tv_nsec / 1000000;
-        if (current_time_ms - Task_ReadUART.last_run_time >= Task_ReadUART.period_ms) {
-            Task_ReadUART.last_run_time = current_time_ms;
-            Task_ReadUART.task_func();
-        }
-        if (current_time_ms - Task_Telemetry.last_run_time >= Task_Telemetry.period_ms) {
-            Task_Telemetry.last_run_time = current_time_ms;
-            Task_Telemetry.task_func();
-        }
-        if (current_time_ms - Task_Heartbeat.last_run_time >= Task_Heartbeat.period_ms) {
-            Task_Heartbeat.last_run_time = current_time_ms;
-            Task_Heartbeat.task_func();
-        }
-    }
+    BufferFill();
 
     return EXIT_SUCCESS;
 }
@@ -126,6 +98,50 @@ void *HWSimulator() {
     }
 
     return NULL;
+}
+
+static void BufferFill() {
+    while (1) {
+        if ((uart_peripheral.STATUS_REG & 1) == 1) {
+            const uint16_t next_head = (rx_head + 1) & 255;
+            if (next_head == rx_tail) {
+                uart_peripheral.STATUS_REG |= 1 << 1;
+            } else {
+                rx_buffer[rx_head] = uart_peripheral.DATA_REG;
+                rx_head = next_head;
+            }
+            uart_peripheral.STATUS_REG &= ~1;
+        }
+
+        RunTasks();
+    }
+}
+
+static void SetLastRunTime() {
+    struct timespec last_run_time;
+    clock_gettime(CLOCK_MONOTONIC, &last_run_time);
+    const uint32_t last_run_time_ms = last_run_time.tv_sec * 1000 + last_run_time.tv_nsec / 1000000;
+    Task_ReadUART.last_run_time = last_run_time_ms;
+    Task_Heartbeat.last_run_time = last_run_time_ms;
+    Task_Telemetry.last_run_time = last_run_time_ms;
+}
+
+static void RunTasks() {
+    struct timespec current_time;
+    clock_gettime(CLOCK_MONOTONIC, &current_time);
+    const uint32_t current_time_ms = current_time.tv_sec * 1000 + current_time.tv_nsec / 1000000;
+    if (current_time_ms - Task_ReadUART.last_run_time >= Task_ReadUART.period_ms) {
+        Task_ReadUART.last_run_time = current_time_ms;
+        Task_ReadUART.task_func();
+    }
+    if (current_time_ms - Task_Telemetry.last_run_time >= Task_Telemetry.period_ms) {
+        Task_Telemetry.last_run_time = current_time_ms;
+        Task_Telemetry.task_func();
+    }
+    if (current_time_ms - Task_Heartbeat.last_run_time >= Task_Heartbeat.period_ms) {
+        Task_Heartbeat.last_run_time = current_time_ms;
+        Task_Heartbeat.task_func();
+    }
 }
 
 void ReadUART_func(void) {
